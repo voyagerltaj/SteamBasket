@@ -1,5 +1,7 @@
 import tkinter as tk
 import customtkinter as ctk
+import os
+import json
 
 # Represents an item
 class Item():
@@ -24,11 +26,12 @@ def default_pack(object, **kwargs):
 
 # Button for Selecting a file with file path display
 class CTkItemListing(ctk.CTkFrame):
-    def __init__(self, *args,
-                 controller = None,
+    def __init__(self,
+                 master,
+                 controller,
                  item : Item = None,
                  **kwargs):
-        super().__init__(*args, 
+        super().__init__(master = master, 
                          fg_color="#252525",
                          **kwargs)
 
@@ -69,16 +72,17 @@ class CTkItemListing(ctk.CTkFrame):
         self.button.pack(side = tk.LEFT, pady = 2, padx = (0, 10))
 
     def delist(self):
-        self.controller.remove_item(self.item)
+        self.controller.remove_item_listing(self)
         self.destroy()
 
 # Interface for adding a new item to the shopping list
 class CTkItemListingPrompt(ctk.CTkFrame):
-    def __init__(self, *args,
-                 controller = None,
-                 item = None,
+    def __init__(self,
+                 master,
+                 controller,
+                 item : Item = Item("New Item", 0.00),
                  **kwargs):
-        super().__init__(*args,
+        super().__init__(master = master,
                          fg_color="#383838",
                           **kwargs)
 
@@ -122,27 +126,40 @@ class CTkItemListingPrompt(ctk.CTkFrame):
             fg_color = "#f16262",
             hover_color = "#863c3c",
             text = "X",
-            command = self.destroy)
+            command = self.cancel)
         self.cancel_button.pack(side = tk.LEFT, pady = 2, padx = (2, 10))
+    
+    def valid_price(self):
+        try:
+            return float(self.price.get()) >= 0.00
+        except ValueError:
+            return False
 
     def list(self):
-        try:
-            price = float(self.price.get())
-            name = self.name.get().strip()
-            if name:
-                self.controller.add_item(Item(name, round(price, 2)))
-                self.destroy()
-        except ValueError:
-            pass
+        name = self.name.get().strip()
+        if name and self.valid_price():
+            self.controller.add_item_listing(Item(name, round(float(self.price.get()), 2)))
+            self.controller.remove_item_prompt(self)
+            self.destroy()
+
+    def cancel(self):
+        self.controller.remove_item_prompt(self)
+        self.destroy()
 
 class ListFrame(ctk.CTkFrame):
-    def __init__(self, master, controller, **kwargs):
-        super().__init__(master, **kwargs)
+    def __init__(self,
+                 master,
+                 controller,
+                 items_listings : list[Item],
+                 items_prompts : list[Item],
+                 **kwargs):
+        super().__init__(master,
+                         **kwargs)
         self.controller : ShoppingListApp = controller
 
         # Item list
-        self.item_list : list[Item] = []
         self.listing_list : list[CTkItemListing] = []
+        self.prompt_list : list[CTkItemListingPrompt] = []
 
         # Purchase total
         self.total : float = 0.0
@@ -178,55 +195,94 @@ class ListFrame(ctk.CTkFrame):
         )
         self.total_value.pack(side = tk.RIGHT, padx = (0, 10))
 
-    def add_item(self, item):
-        self.item_list.append(item)
-        self.item_list.sort(reverse = True, key = lambda Item : Item.get_price())
-        self.update_total()
+        for item in items_listings:
+            self.add_item_listing(item)
+        for item in items_prompts:
+            self.add_item_prompt(item)
+
+    def add_item_listing(self, item : Item):
+        listing = CTkItemListing(
+            master = self.listing_display,
+            controller = self,
+            item = item
+        )
+        self.listing_list.append(listing)
+        self.update_total(item.get_price())
         self.refresh_listing_display()
 
-    def remove_item(self, item):
-        self.item_list.remove(item)
-        self.add_item_prompt(item)
-        self.update_total()
+    def remove_item_listing(self, listing : CTkItemListing):
+        self.listing_list.remove(listing)
+        self.add_item_prompt(listing.item)
+        self.update_total(-listing.item.get_price())
 
-    def update_total(self):
-        self.total = 0.0
-        for item in self.item_list:
-            self.total += item.get_price()
+    def update_total(self, price : float):
+        self.total += price
         self.total_value.configure(text = f"{self.total:.2f}€")
 
     def refresh_listing_display(self):
-        for frame in self.listing_list:
-            frame.destroy()
-        self.listing_list.clear()
+        self.listing_list.sort(reverse = True, key = lambda listing : listing.item.get_price())
+        for listing in self.listing_list:
+            listing.pack_forget()
+            default_pack(listing, side = 'top', padx = 9)
 
-        for item in self.item_list:
-            frame = CTkItemListing(
-                master = self.listing_display,
-                item = item,
-                controller = self
-            )
-            default_pack(frame, side = 'top', padx = 9)
-            self.listing_list.append(frame)
-
-    def add_item_prompt(self, item = Item("New Item", 0.00)):
-        frame = CTkItemListingPrompt(
+    def add_item_prompt(self, item : Item = Item("New Item", 0.00)):
+        prompt = CTkItemListingPrompt(
             master = self.listing_display,
+            controller = self,
             item = item,
-            controller = self
         )
-        default_pack(frame, side = 'bottom', padx = 9)
+        self.prompt_list.append(prompt)
+        default_pack(prompt, side = 'bottom', padx = 9)
 
-# Main app to manage frames
+    def remove_item_prompt(self, prompt : CTkItemListingPrompt):
+        self.prompt_list.remove(prompt)
+
+class AppData:
+    def __init__(self, filename = "steam_basket.json"):
+        self.filename = filename
+
+    def save(self, listings : list[CTkItemListing], prompts : list[CTkItemListingPrompt]):
+        data = {
+            'listings' : [{"name": listing.item.get_name(), "price": listing.item.get_price()} for listing in listings],
+            'prompts' : [{"name": prompt.name.get(), "price": float(prompt.price.get()) if prompt.valid_price() else 0.00} for prompt in prompts]
+        }
+        with open(self.filename, 'w') as f:
+            json.dump(data, f)
+
+    def load(self):
+        if not os.path.exists(self.filename):
+            return [], []
+        else:
+            with open(self.filename, 'r') as f:
+                data = json.load(f)
+
+            items_listings = [Item(i["name"], i["price"]) for i in data.get('listings', [])]
+            items_prompts = [Item(i["name"], i["price"]) for i in data.get('prompts', [])]
+            return items_listings, items_prompts
+
+# Main app controller
 class ShoppingListApp:
     def __init__(self, root):
         self.root : ctk.CTk = root
-        self.root.title("Shopping List")
+        self.root.title("SteamBasket")
         self.root.geometry(f"400x600")
+        self.root.minsize(400, 600)
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        self.data = AppData()
+        items_listings, items_prompts = self.data.load()
 
         # Create main frame
-        self.main_frame = ListFrame(self.root, self)
+        self.main_frame = ListFrame(
+            master = self.root, 
+            controller = self,
+            items_listings = items_listings,
+            items_prompts = items_prompts)
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    def on_close(self):
+        self.data.save(self.main_frame.listing_list, self.main_frame.prompt_list)
+        self.root.destroy()
 
 # Main program loop
 def main():
