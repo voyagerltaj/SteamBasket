@@ -146,6 +146,7 @@ class CTkItemListingPrompt(ctk.CTkFrame):
         self.controller.remove_item_prompt(self)
         self.destroy()
 
+# Main display frame for the application. Responsible for managing all the item listings
 class ListFrame(ctk.CTkFrame):
     def __init__(self,
                  master,
@@ -176,7 +177,7 @@ class ListFrame(ctk.CTkFrame):
             command = self.add_item_prompt)
         default_pack(self.new_item_button, side = 'bottom')
 
-        # Total display
+        # Total item value display
         self.total_frame = ctk.CTkFrame(self, fg_color = "#252525")
         default_pack(self.total_frame, pady = (0, 10))
 
@@ -195,6 +196,7 @@ class ListFrame(ctk.CTkFrame):
         )
         self.total_value.pack(side = tk.RIGHT, padx = (0, 10))
 
+        # Load from save data in case some was found
         for item in items_listings:
             self.add_item_listing(item)
         for item in items_prompts:
@@ -219,6 +221,7 @@ class ListFrame(ctk.CTkFrame):
         self.total += price
         self.total_value.configure(text = f"{self.total:.2f}€")
 
+    # Reorganizes the listing display to guarantee order when new entries are added
     def refresh_listing_display(self):
         self.listing_list.sort(reverse = True, key = lambda listing : listing.item.get_price())
         for listing in self.listing_list:
@@ -241,14 +244,16 @@ class AppData:
     def __init__(self, filename = "steam_basket.json"):
         self.filename = filename
 
+    # Loads ListFrame's listings' and listing prompts' items as two lists in a json file
     def save(self, listings : list[CTkItemListing], prompts : list[CTkItemListingPrompt]):
         data = {
-            'listings' : [{"name": listing.item.get_name(), "price": listing.item.get_price()} for listing in listings],
-            'prompts' : [{"name": prompt.name.get(), "price": float(prompt.price.get()) if prompt.valid_price() else 0.00} for prompt in prompts]
+            'listings' : [{"name" : listing.item.get_name(), "price" : listing.item.get_price()} for listing in listings],
+            'prompts' : [{"name" : prompt.name.get(), "price" : float(prompt.price.get()) if prompt.valid_price() else 0.00} for prompt in prompts]
         }
         with open(self.filename, 'w') as f:
             json.dump(data, f)
 
+    # Attempts to load item lists from previously saved json file
     def load(self):
         if not os.path.exists(self.filename):
             return [], []
@@ -263,16 +268,20 @@ class AppData:
 # Main app controller
 class ShoppingListApp:
     def __init__(self, root):
+        # App window
         self.root : ctk.CTk = root
         self.root.title("SteamBasket")
         self.root.geometry(f"400x600")
         self.root.minsize(400, 600)
+        # Define save function on closure
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
+        # App data manager
         self.data = AppData()
+        # Attempt to load saved data
         items_listings, items_prompts = self.data.load()
 
-        # Create main frame
+        # Create main frame with saved data (empty if none)
         self.main_frame = ListFrame(
             master = self.root, 
             controller = self,
@@ -280,6 +289,7 @@ class ShoppingListApp:
             items_prompts = items_prompts)
         self.main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
+    # Defined app behaviour uppon window closure
     def on_close(self):
         self.data.save(self.main_frame.listing_list, self.main_frame.prompt_list)
         self.root.destroy()
